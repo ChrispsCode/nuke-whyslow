@@ -45,7 +45,9 @@ def format_report(report: Report) -> str:
     lines = [
         RULE,
         f"Why Slow? report: {report.script_name}",
-        f"Nuke {report.nuke_version} | {report.node_count} nodes | scanned in {report.duration:.2f}s",
+        f"Nuke {report.nuke_version} | {report.node_count} nodes | "
+        f"{'deep' if report.deep else 'quick'} scan in {report.duration:.2f}s"
+        + (" | CANCELLED" if report.cancelled else ""),
         f"{len(issues)} issue(s) found",
         RULE,
     ]
@@ -66,8 +68,8 @@ def format_report(report: Report) -> str:
 
     skipped = report.with_status(STATUS_SKIPPED)
     if skipped:
-        lines += ["Skipped (not available in this scan):"]
-        lines += [f"  -- {r.title}" for r in skipped]
+        lines += ["Skipped:"]
+        lines += [f"  -- {r.title}" + (f" ({r.note})" if r.note else "") for r in skipped]
 
     lines.append(RULE)
     return "\n".join(lines)

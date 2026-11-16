@@ -18,7 +18,7 @@ from functools import cached_property
 import nuke
 
 from whyslow import config
-from whyslow.core.check import NEEDS_PREFS, NEEDS_SCRIPT, NEEDS_SESSION
+from whyslow.core.check import NEEDS_GUI, NEEDS_PREFS, NEEDS_SCRIPT, NEEDS_SESSION
 
 
 @dataclass
@@ -51,7 +51,10 @@ class CallbackEntry:
 class ScanContext:
     """The live Nuke session: the open script, its preferences and callbacks."""
 
-    provides: frozenset[str] = frozenset({NEEDS_SCRIPT, NEEDS_PREFS, NEEDS_SESSION})
+    @property
+    def provides(self) -> frozenset[str]:
+        base = {NEEDS_SCRIPT, NEEDS_PREFS, NEEDS_SESSION}
+        return frozenset(base | {NEEDS_GUI}) if nuke.GUI else frozenset(base)
 
     def shared(self, key: str, factory):
         """Compute a value once per scan and share it between checks.

@@ -19,5 +19,26 @@ def class_breakdown(classes: list[str], limit: int = 6) -> str:
     return text
 
 
+def ms(value: float) -> str:
+    """"0.04 ms" for small costs, "11.1 ms" for bigger ones."""
+    return f"{value:.2f} ms" if value < 1 else f"{value:.1f} ms"
+
+
 def line_count(code: str) -> str:
     return plural(len(code.strip().splitlines()), "line")
+
+
+def print_hook_severity(check, cost_ms: float, echo: bool):
+    """Severity for Python that runs on every Script Editor print.
+
+    Any listener is at least Medium (the caller only asks when there is one).
+    With echo on, ordinary UI actions print too (at least two changes each),
+    so the cost counts double and the floor is High. Thresholds are the
+    check's severity_steps, in ms per change.
+    """
+    from whyslow.core.finding import Severity
+    effective = cost_ms * (2 if echo else 1)
+    severity = max(Severity.MEDIUM, check.severity_for(int(effective)))
+    if echo:
+        severity = max(severity, Severity.HIGH)
+    return severity

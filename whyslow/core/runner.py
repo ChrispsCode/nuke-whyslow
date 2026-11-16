@@ -32,6 +32,7 @@ class CheckResult:
     finding: Finding | None = None
     error: str = ""          # # traceback text for STATUS_ERROR
     duration: float = 0.0    # # seconds
+    note: str = ""           # # why it was skipped, for STATUS_SKIPPED
 
     @property
     def severity(self) -> Severity | None:
@@ -45,6 +46,8 @@ class Report:
     node_count: int
     duration: float
     results: list[CheckResult] = field(default_factory=list)
+    deep: bool = False
+    cancelled: bool = False
 
     @property
     def issues(self) -> list[CheckResult]:
@@ -88,10 +91,16 @@ def discover_checks() -> list[CheckResult]:
 # # Running
 # # #----------------------------------------------------------------------------
 
-def run_check(check: Check, ctx) -> CheckResult:
+def run_check(check: Check, ctx, deep: bool = False) -> CheckResult:
     result = CheckResult(check.id, check.title, check.category, check.description, STATUS_PASSED)
-    if not check.needs <= ctx.provides:
+    missing = check.needs - ctx.provides
+    if missing:
         result.status = STATUS_SKIPPED
+        result.note = "needs the Nuke GUI" if missing == {"gui"} else f"not available here ({', '.join(sorted(missing))})"
+        return result
+    if check.deep and not deep:
+        result.status = STATUS_SKIPPED
+        result.note = "deep scan only"
         return result
 
     start = time.perf_counter()
@@ -113,8 +122,13 @@ def run_check(check: Check, ctx) -> CheckResult:
     return result
 
 
-def run_checks(ctx=None) -> Report:
-    """Run every registered check against `ctx` (the live session by default)."""
+def run_checks(ctx=None, deep: bool = False, progress=None) -> Report:
+    """Run every registered check against `ctx` (the live session by default).
+
+    `deep` also runs the slow checks. `progress(fraction, message)` is called
+    before each check; if it returns True the scan is cancelled and the
+    remaining checks are marked skipped.
+    """
     if ctx is None:
         from whyslow.core.context import ScanContext
         ctx = ScanContext()
@@ -122,7 +136,18 @@ def run_checks(ctx=None) -> Report:
     start = time.perf_counter()
     results = discover_checks()
     checks = sorted((cls() for cls in registered_checks()), key=lambda c: (c.order, c.title))
-    results += [run_check(check, ctx) for check in checks]
+    cancelled = False
+    for index, check in enumerate(checks):
+        if not cancelled and progress is not None:
+            message = check.progress_message or f"Checking: {check.title}"
+            cancelled = bool(progress(index / len(checks), message))
+        if cancelled:
+            results.append(CheckResult(check.id, check.title, check.category, check.description,
+                                       STATUS_SKIPPED, note="scan cancelled"))
+            continue
+        results.append(run_check(check, ctx, deep))
+    if progress is not None and not cancelled:
+        progress(1.0, "Done")
 
     return Report(
         script_name=ctx.script_name,
@@ -130,4 +155,6 @@ def run_checks(ctx=None) -> Report:
         node_count=len(ctx.all_nodes),
         duration=time.perf_counter() - start,
         results=results,
+        deep=deep,
+        cancelled=cancelled,
     )

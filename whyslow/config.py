@@ -66,3 +66,21 @@ STAMP_CUSTOM_KNOB = "panel_hook"
 TEXT_WRAP = 78
 # # Longest callback source shown in the details code view.
 MAX_CODE_CHARS = 20_000
+
+# # #----------------------------------------------------------------------------
+# # Probes (trigger something in the UI and record which Python answers)
+# # #----------------------------------------------------------------------------
+
+# # Tools that have their own card. The generic hook checks still list their
+# # hooks but don't count them, so one problem doesn't show up on two cards.
+DEDICATED_TOOLS = {"KnobScripter"}
+# # How long the deep scan watches Nuke sitting idle.
+IDLE_PROBE_SECONDS = 1.5
+# # Custom events sent through Qt to find application-wide event filters.
+PROBE_EVENT_COUNT = 500
+# # The classes Nuke itself puts on sys.stdout / sys.stderr in the GUI
+# # (same in 15.2 and 17.1). Anything else means a tool has wrapped print.
+EXPECTED_STREAMS = {
+    "stdout": "hiero.FnRedirect.SESysStdOut",
+    "stderr": "hiero.FnRedirect.SESysStdErr",
+}

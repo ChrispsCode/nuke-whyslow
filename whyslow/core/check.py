@@ -48,6 +48,8 @@ CATEGORY_SESSION = "Session"
 NEEDS_SCRIPT = "script"
 NEEDS_PREFS = "prefs"
 NEEDS_SESSION = "session"
+# # Needs Nuke's Qt UI (probes that trigger widgets and watch what runs).
+NEEDS_GUI = "gui"
 
 
 class Check:
@@ -58,6 +60,11 @@ class Check:
     category: str = CATEGORY_SCRIPT
     description: str = ""
     needs: frozenset[str] = frozenset({NEEDS_SCRIPT})
+    # # Deep checks are slow (e.g. watching Nuke idle for a while), so they only
+    # # run when a deep scan is asked for.
+    deep: bool = False
+    # # Shown in the progress bar while this check runs.
+    progress_message: str = ""
     # # Lower runs (and lists) first among equal severities.
     order: int = 100
     # # Count-based default severity: the highest step whose threshold the count

@@ -6,6 +6,7 @@ import html
 
 from whyslow import __version__, logger
 from whyslow.core import runner, text_report
+from whyslow.progress import NukeProgress
 from whyslow.core.finding import Severity
 from whyslow.core.runner import STATUS_ERROR, STATUS_PASSED, STATUS_SKIPPED, Report
 from whyslow.qt import QtGui, QtWidgets, Qt, is_valid
@@ -70,9 +71,18 @@ class ReportDialog(QtWidgets.QDialog):
         header_text.addWidget(self.summary_label)
         header.addLayout(header_text)
         header.addStretch(1)
+        scan_buttons = QtWidgets.QVBoxLayout()
         rescan_button = QtWidgets.QPushButton("Re-scan")
-        rescan_button.clicked.connect(self.rescan)
-        header.addWidget(rescan_button, 0, Qt.AlignTop)
+        rescan_button.setToolTip("Run the quick checks again.")
+        rescan_button.clicked.connect(lambda: self.rescan(deep=False))
+        deep_button = QtWidgets.QPushButton("Deep scan")
+        deep_button.setToolTip("Also run the slow checks, e.g. watching Nuke idle for a moment "
+                               "to catch tools that keep running Python in the background.")
+        deep_button.clicked.connect(lambda: self.rescan(deep=True))
+        scan_buttons.addWidget(rescan_button)
+        scan_buttons.addWidget(deep_button)
+        scan_buttons.addStretch(1)
+        header.addLayout(scan_buttons)
         layout.addLayout(header)
 
         # # #--------------------------------------------------------------------
@@ -123,12 +133,17 @@ class ReportDialog(QtWidgets.QDialog):
     # # Populating
     # # #------------------------------------------------------------------------
 
-    def rescan(self) -> None:
+    def rescan(self, deep: bool = False) -> None:
+        """Run the checks with a Nuke progress bar. The window is disabled meanwhile,
+        since a deep scan lets Nuke's event loop run (no re-entrant scans)."""
+        self.setEnabled(False)
         QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            report = runner.run_checks()
+            with NukeProgress("Why Slow? deep scan" if deep else "Why Slow? scan") as progress:
+                report = runner.run_checks(deep=deep, progress=progress)
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
+            self.setEnabled(True)
         self.set_report(report)
 
     def set_report(self, report: Report) -> None:
@@ -136,8 +151,10 @@ class ReportDialog(QtWidgets.QDialog):
         self._close_details()
 
         self.script_label.setText(report.script_name)
+        scan = "Deep scan" if report.deep else "Quick scan"
         self.info_label.setText(f"{report.node_count:,} nodes  ·  Nuke {report.nuke_version}  ·  "
-                                f"scanned in {report.duration:.2f}s")
+                                f"{scan} in {report.duration:.2f}s"
+                                + ("  ·  CANCELLED" if report.cancelled else ""))
         self.summary_label.setText(self._summary_html(report))
 
         container = QtWidgets.QWidget()
@@ -164,7 +181,8 @@ class ReportDialog(QtWidgets.QDialog):
         rows = [f"<span style='color:{theme.PASSED_COLOR}'>✔</span> <b>{html.escape(r.title)}</b><br>"
                 f"&nbsp;&nbsp;&nbsp;&nbsp;<span style='color:{theme.MUTED_TEXT}'>{html.escape(r.description)}</span>"
                 for r in passed]
-        rows += [f"<span style='color:{theme.MUTED_TEXT}'>– {html.escape(r.title)} (skipped)</span>"
+        rows += [f"<span style='color:{theme.MUTED_TEXT}'>– {html.escape(r.title)} "
+                 f"(skipped{': ' + html.escape(r.note) if r.note else ''})</span>"
                  for r in skipped]
         self.passed_label.setText("<br>".join(rows))
 
