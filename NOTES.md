@@ -73,10 +73,14 @@ What counts as an entry point: a call from C++, or a third-party function **from
 - `tests/test_gui_probes.py`, **inside GUI Nuke** (`exec(open(...).read())`, e.g. through nuke-mcp). It plants one hook of each kind from a fake `fake_tool` module and reproduces KnobScripter with filler output, checks each card, then cleans up. KnobScripter's hook can't be removed, so restart Nuke afterwards. Its KnobScripter severity tests need a fresh Nuke (no hooks, small output) and are skipped otherwise. All passed in 15.2v9 on 2026-11-17.
 - GUI: Harry's checklist. The first pass (7 checks) passed on 2026-11-17.
 
+## Field testing
+
+[docs/HANDOFF_production_test.md](docs/HANDOFF_production_test.md) briefs a claude.ai web chat for testing in production, where Claude Code isn't available. It covers what Why Slow? does and can't see yet, Script Editor snippets for investigating on the spot (also in `docs/snippets/`: the callback inventory, the recorder, thread sampling, Qt objects, and the stall meter; all run in the 15.2 GUI on 2026-11-17), and the report format to bring home.
+
 ## Roadmap
 
 1. More triggers, to *measure* what the global knobChanged and autolabel callbacks cost: change a knob on a temporary node, force a Node Graph redraw (async, like the frame probe).
-2. A static "Python in knob expressions" check (`[python` in `writeKnobs` output, plus `label`, which `writeKnobs` leaves out), to find per-frame Python even on frames the probe doesn't visit. Especially bad with echo on, which echoes every evaluation to the Script Editor.
+2. **Only if an example turns up that the frame probe misses:** a static "Python in knob expressions" check (`[python` in `writeKnobs` output, plus `label`, which `writeKnobs` leaves out). Nuke evaluates expressions and labels on every frame change whether or not the node feeds a Viewer. The probe caught `[python]` on unconnected nodes (`Blur3.size`, `NoOp1.label`), so the probe covers it so far. Candidates to test: frames the probe doesn't visit, and labels inside groups whose Node Graph isn't open.
 3. Scanning a script on disk (headless Nuke subprocess, then the report as JSON).
 4. Reading another user's preferences file.
 5. Maybe fix buttons on cards (a `Finding` could carry actions), e.g. "clear the Script Editor output".
