@@ -100,6 +100,22 @@ EXPECTED_STREAMS = {
 FRAME_PROBE_STEPS = 10
 FRAME_SLOW_MS = 50.0
 
+# # Storage probe (deep scan): every file the script reads and the session
+# # depends on is traced to its real filer, and each filer is timed in the
+# # background (a stat, then an open + 64 KB read of a file the script uses).
+# # A single operation slower than this many seconds counts as "no answer".
+STORAGE_OP_TIMEOUT_S = 2.0
+# # Timings per filer (the median is reported).
+STORAGE_REPEATS = 3
+# # Node classes whose files are only written on render, never read by the GUI.
+STORAGE_IGNORE_CLASSES = {"Write", "DeepWrite", "WriteGeo", "WriteGeo2", "WriteTank"}
+# # With the Viewer on a file-per-frame sequence, Nuke opens each frame's file
+# # on the UI thread. The UI freeze per frame change is about this many times
+# # the probe's open + read time. Measured in 15.2 with a FUSE mirror adding
+# # 300 ms per filesystem operation: Nuke froze 2.7 s per frame (9 round trips),
+# # the probe's open + read took 1.8 s (6 round trips).
+STORAGE_FRAME_FACTOR = 1.5
+
 # # #----------------------------------------------------------------------------
 # # Tools whose nodes get their own knobChanged card
 # # #----------------------------------------------------------------------------

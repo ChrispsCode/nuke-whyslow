@@ -38,6 +38,7 @@ Started 2026-11-17 after the KnobScripter investigation ([knobscripter_findings.
 | `app_event_filters` | Medium; 20+ µs per event High | GUI. Sends 500 custom events to an object nothing uses; any Python that sees them is an app-wide event filter. |
 | `idle_python` | Low; 10+ ms/s Medium; 50+ ms/s High | GUI, **deep, async**. Watches Nuke idle for 1.5 s and records third-party Python (timers, polling). |
 | `frame_change` | Low; 5+ ms/frame Medium; 20+ High; 40+ Critical (tool Python per frame). Info when frames are slow (50+ ms) with no tool Python | GUI, **deep, async**. Steps 10 frames (kept inside the project range when it's 11+ frames long) on a 0 ms QTimer chain, so the Viewer never renders. Records tool Python per frame, `[python]` knob code by node and knob, and what was printed to the Script Editor. Restores the frame. |
+| `storage` | Per filer, by the time for one open + 64 KB read: 5+ ms Low, 20+ Medium, 100+ High, 1 s+ or no answer Critical. One level lower for a filer with no sequences on it | GUI, **deep, async**. One card, with one row per filer. It collects every `File_Knob` on nodes (except Writes and disabled nodes), at the current frame and the next two, plus session paths (script, autosave, caches, OCIO, `sys.path`, plugin path). Each directory is resolved with `realpath()` to its real filer via `/proc/mounts`; when mounts are stacked (autofs, then nfs4) the last one listed wins. Each filer is timed in daemon threads, with each operation watched against `STORAGE_OP_TIMEOUT_S`, so a hung filer is reported and never freezes Nuke. The UI freeze per frame is estimated as `STORAGE_FRAME_FACTOR` (1.5) × open time. |
 | `python_tracing` | Critical | `sys.gettrace/getprofile` and the threading equivalents. |
 | `stream_redirect` | Medium | GUI. `sys.stdout/stderr` aren't `hiero.FnRedirect.SESysStdOut/Err`. |
 | `stamps_custom` (card: "Juicy Stamps", the user-facing name of our build) | Low, any number | Stamps with `panel_hook`. The details note Anchors' autolabel (by design), Stamps currently armed, and older Wired Stamps that still have an autolabel. |
@@ -53,6 +54,16 @@ What counts as an entry point: a call from C++, or a third-party function **from
 **Deep scan:** checks with `deep = True` only run from the Deep scan button (or `whyslow.report(deep=True)`). Quick scans list them as skipped, "deep scan only".
 
 **Progress:** `whyslow.progress.NukeProgress` (a `nuke.ProgressTask`) is passed to `runner.run_checks(progress=...)`. It's called before each check with that check's `progress_message`, and Cancel marks the remaining checks as skipped. The report window is disabled while a scan runs, so a deep scan's nested event loop can't start a second scan.
+
+## Slow storage: what was measured (15.2, 2026-11-17)
+
+`tests/slowfs.py` is a read-only FUSE mirror that adds a delay to each filesystem operation, read live from a JSON file; `"hang"` blocks. It runs from `tests/.venv` (fusepy). These were measured in the GUI with the Viewer connected and a frame every 600 ms, using a 10 ms stall meter:
+- An EXR sequence at 300 ms per operation froze the UI **2.7 s on every frame change** (about 9 round trips, on the UI thread). Connecting the Viewer froze it 2.7 s too.
+- A BRAW clip at 300 ms didn't freeze while scrubbing; it's opened once.
+- With the Viewer off, frame changes don't touch the files. Panel, select, Reload and create Blur were barely affected.
+- The probe's open + read through the mirror takes 6 round trips, against Nuke's 9 per frame, hence `STORAGE_FRAME_FACTOR = 1.5`. The card's estimate (2.7 s) matched the measured freeze.
+
+So a clean session doesn't freeze when *creating a node* on a slow filer. Harry's work freezes (creating a Blur taking minutes when the database is down) point to a tool's Python waiting on the network: roadmap item 0.
 
 ## Decisions
 
@@ -71,6 +82,8 @@ What counts as an entry point: a call from C++, or a third-party function **from
 - `tests/make_stamps_fixtures.py` regenerates `stamps_vanilla.nk` and `stamps_custom.nk` with each real Stamps build, one Nuke process per build.
 - `tests/gui_preview.py` renders the report and details dialogs offscreen from the showcase JSON (run the tests first). See the docstring for the command.
 - `tests/test_gui_async.py`, **inside GUI Nuke**. It runs real async deep scans (clean, planted, then clean again) and stores results in `builtins._whyslow_gui_async`; read them once it's done (a few seconds). All passed in 15.2v9 on 2026-11-17.
+- `tests/test_storage_probe.py`, with plain `python3` (no Nuke) and the slowfs EXR mirror mounted: mount parsing, fast, slow, a hung open, a hung lookup, and missing files.
+- `tests/test_gui_storage.py`, **inside GUI Nuke** with both mirrors mounted: three real deep scans (fast, 300 ms, a hung open). The UI stayed under 41 ms per freeze while a filer was hung.
 - `tests/test_gui_probes.py`, **inside GUI Nuke** (`exec(open(...).read())`, e.g. through nuke-mcp). It plants one hook of each kind from a fake `fake_tool` module and reproduces KnobScripter with filler output, checks each card, then cleans up. KnobScripter's hook can't be removed, so restart Nuke afterwards. Its KnobScripter severity tests need a fresh Nuke (no hooks, small output) and are skipped otherwise. All passed in 15.2v9 on 2026-11-17.
 - GUI: Harry's checklist. The first pass (7 checks) passed on 2026-11-17.
 
@@ -80,6 +93,7 @@ What counts as an entry point: a call from C++, or a third-party function **from
 
 ## Roadmap
 
+0. **Next, from the storage work:** (B) time blocking C calls in the profiler (socket, DNS, `select`, `stat`/`open`, `subprocess`, `sleep`) and pin them on the entry point; (C) a "create a node" deep-scan probe. Test with a fake tool whose `onCreate` connects to an unresponsive local socket.
 1. More triggers, to *measure* what the global knobChanged and autolabel callbacks cost: change a knob on a temporary node, force a Node Graph redraw (async, like the frame probe).
 2. **Only if an example turns up that the frame probe misses:** a static "Python in knob expressions" check (`[python` in `writeKnobs` output, plus `label`, which `writeKnobs` leaves out). Nuke evaluates expressions and labels on every frame change whether or not the node feeds a Viewer. The probe caught `[python]` on unconnected nodes (`Blur3.size`, `NoOp1.label`), so the probe covers it so far. Candidates to test: frames the probe doesn't visit, and labels inside groups whose Node Graph isn't open.
 3. Scanning a script on disk (headless Nuke subprocess, then the report as JSON).

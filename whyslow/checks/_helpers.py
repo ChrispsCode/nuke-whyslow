@@ -20,7 +20,9 @@ def class_breakdown(classes: list[str], limit: int = 6) -> str:
 
 
 def ms(value: float) -> str:
-    """"0.04 ms" for small costs, "11.1 ms" for bigger ones."""
+    """"0.04 ms" for small costs, "11.1 ms" for bigger ones, "2.7 s" from a second up."""
+    if value >= 1000:
+        return f"{value / 1000:.1f} s"
     return f"{value:.2f} ms" if value < 1 else f"{value:.1f} ms"
 
 
