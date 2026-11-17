@@ -102,10 +102,13 @@ FRAME_SLOW_MS = 50.0
 
 # # Node-creation probe (deep scan): these classes are created (with
 # # nuke.createNode, like a user would) and deleted again, with undo off, and
-# # any tool Python that runs is recorded. Reported even without tool Python
-# # when creating one takes longer than NODE_CREATE_SLOW_MS of GUI time.
+# # any tool Python that runs is recorded. Tool Python is graded by the
+# # check's own steps (SEVERITY_OVERRIDES["node_create"]). The GUI time to
+# # create and delete one node is graded here too, whether or not any tool
+# # Python ran, as (at least N ms, name) steps; the card takes the higher of
+# # the two. Below the first step, Nuke itself counts as fast enough.
 NODE_CREATE_PROBE_CLASSES = ["Blur"]
-NODE_CREATE_SLOW_MS = 100.0
+NODE_CREATE_GUI_STEPS = ((100, "low"), (500, "medium"), (2000, "high"), (10000, "critical"))
 
 # # Storage probe (deep scan): every file the script reads and the session
 # # depends on is traced to its real filer, and each filer is timed in the

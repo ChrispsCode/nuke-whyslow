@@ -38,7 +38,8 @@ class NodeCreate(AsyncCheck):
     deep = True
     progress_message = "Creating and deleting a temporary node..."
     order = 68
-    # # ms of tool Python per node created (and deleted) -> severity.
+    # # ms of tool Python per node created (and deleted) -> severity. GUI time
+    # # is graded by config.NODE_CREATE_GUI_STEPS; the card takes the higher.
     severity_steps = ((0, Severity.LOW), (20, Severity.MEDIUM), (100, Severity.HIGH), (1000, Severity.CRITICAL))
 
     def start(self, ctx, done, progress):
@@ -118,6 +119,15 @@ class NodeCreate(AsyncCheck):
 
     # # #------------------------------------------------------------------------
 
+    @staticmethod
+    def gui_severity(gui_ms: float) -> Severity | None:
+        """Severity of the GUI time to create and delete a node, None below the first step."""
+        result = None
+        for threshold, severity in sorted(config.NODE_CREATE_GUI_STEPS, key=lambda step: step[0]):
+            if gui_ms >= threshold:
+                result = Severity.coerce(severity)
+        return result
+
     def _finding(self, entries, times, classes):
         count = max(1, len(times))
         tools = probe.others(entries)
@@ -127,25 +137,34 @@ class NodeCreate(AsyncCheck):
         timing = "; ".join(f"{cls}: create {ms(steps[0])}" + (f", delete {ms(steps[1])}" if len(steps) > 1 else "")
                            for cls, steps in gui.items())
 
-        if not tools and slowest < config.NODE_CREATE_SLOW_MS:
+        gui_severity = self.gui_severity(slowest)
+        if not tools and gui_severity is None:
             return None
         if not tools:
             return self.finding(
-                severity=Severity.INFO,
+                severity=gui_severity,
                 metric=ms(slowest),
                 summary=(f"Creating and deleting a node takes {ms(slowest)} of GUI time, but no tool's "
                          "Python runs during it, so the cost is in Nuke itself."),
-                whats_happening=f"Created and deleted {', '.join(classes)} with undo off. {timing}.",
-                why_slow="Nuke itself is slow to add nodes here: a very large script, or many open panels.",
-                how_to_fix="Check the script size and close panels you don't need.",
+                whats_happening=(f"Created and deleted {', '.join(classes)} with undo off. {timing}. "
+                                 "Only Nuke's own code ran (its C++ and its stock Python)."),
+                why_slow=("Nuke itself is slow to add nodes here, and every node anyone creates waits "
+                          "for it: a very large script, many open panels or editors, or Nuke touching "
+                          "slow storage (see the Slow storage card)."),
+                how_to_fix=("Check the script size, close panels and editors you don't need, and check "
+                            "the Slow storage card for a filer that isn't answering."),
             )
 
         names = ", ".join(sorted({e.tool for e in tools}))
+        severity = self.severity_for(int(python_ms))
+        if gui_severity is not None and gui_severity > severity:
+            severity = gui_severity
         return self.finding(
-            severity=self.severity_for(int(python_ms)),
+            severity=severity,
             metric=f"{ms(python_ms)}/node",
             summary=(f"Creating a node runs {ms(python_ms)} of Python from {names}."
-                     + waits_note(tools)),
+                     + waits_note(tools)
+                     + f" Creating and deleting one took {ms(slowest)} of GUI time in total."),
             whats_happening=(
                 f"Created and deleted {', '.join(classes)} with nuke.createNode (as a user would; "
                 f"undo was off, and the selection was put back) and recorded what ran. {timing} "
