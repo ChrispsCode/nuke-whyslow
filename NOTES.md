@@ -35,7 +35,8 @@ Started 2026-11-17 after the KnobScripter investigation ([knobscripter_findings.
 | `knobscripter` | Installed with no hooks: Low. Any hook: Medium. Echo on: at least High. Measured cost per printed line (doubled with echo): 5+ ms High, 20+ ms Critical | GUI. Emits the Script Editor output's `textChanged` (runs every listener, text unchanged) and times KnobScripter's share. Lists registered KnobScripters, hidden ones, and echo. |
 | `script_editor_hooks` | Same rules as KnobScripter | GUI. Any tool's Python on the Script Editor output. Vanilla has 0 receivers there. KnobScripter rows are listed but counted on its own card (`config.DEDICATED_TOOLS`). |
 | `app_event_filters` | Medium; 20+ µs per event High | GUI. Sends 500 custom events to an object nothing uses; any Python that sees them is an app-wide event filter. |
-| `idle_python` | Low; 10+ ms/s Medium; 50+ ms/s High | GUI, **deep scan only**. Lets the event loop run for 1.5 s and records third-party Python (timers, polling). |
+| `idle_python` | Low; 10+ ms/s Medium; 50+ ms/s High | GUI, **deep, async**. Watches Nuke idle for 1.5 s and records third-party Python (timers, polling). |
+| `frame_change` | Low; 5+ ms/frame Medium; 20+ High; 40+ Critical (tool Python per frame). Info when frames are slow (50+ ms) with no tool Python | GUI, **deep, async**. Steps 10 frames (kept inside the project range when it's 11+ frames long) on a 0 ms QTimer chain, so the Viewer never renders. Records tool Python per frame, `[python]` knob code by node and knob, and what was printed to the Script Editor. Restores the frame. |
 | `python_tracing` | Critical | `sys.gettrace/getprofile` and the threading equivalents. |
 | `stream_redirect` | Medium | GUI. `sys.stdout/stderr` aren't `hiero.FnRedirect.SESysStdOut/Err`. |
 | `stamps_custom` (card: "Juicy Stamps", the user-facing name of our build) | Low, any number | Stamps with `panel_hook`. The details note Anchors' autolabel (by design), Stamps currently armed, and older Wired Stamps that still have an autolabel. |
@@ -44,7 +45,9 @@ Started 2026-11-17 after the KnobScripter investigation ([knobscripter_findings.
 
 `whyslow/core/probe.py`. To find hooks we don't know about, we trigger something in Nuke's UI and record which Python runs in response. The profiler (`sys.setprofile`) records only **entry points**, functions called directly from C++, recognised by the innermost item on the profiler's stack being a `c_call`. Each is attributed to its file and module (the tool), and Nuke's own code (inside the install folder) and whyslow are filtered out. Timing is measured separately, without the profiler, as a median of 5 runs, and split between tools by their profiled share.
 
-The probes found so far are synchronous: emitting a signal runs its receivers directly, sendEvent goes through the app's event filters, and the idle probe runs a short nested `QEventLoop`. Future triggers that need Nuke's own processing between steps (a real Node Graph redraw, the real print path) should be QTimer-driven.
+What counts as an entry point: a call from C++, or a third-party function **from a real file** called from Nuke's own Python. The second covers `nuke.add…` callbacks, which Nuke runs through its stock dispatcher. Library-generated code (`namedtuple`, dataclasses: `<string>` files) called from stock code isn't counted, so psutil behind Nuke's status bar doesn't show up. Code run from knob strings (`<string>`) records `nuke.thisNode()`/`thisKnob()`, so `[python]` expressions, labels and knob scripts are named by node and knob.
+
+**Sync vs async probes.** Emitting a signal and `sendEvent` are synchronous and work inside the scan's Python call. **But Nuke holds back its own UI work (Node Graph redraws, panel refreshes, label and expression evaluation, frame-change updates) until the running Python command returns.** A nested `QEventLoop` doesn't help: only Qt timers fire in it. So the idle and frame-change probes are `AsyncCheck`s. `start()` sets up a QTimer chain and returns, the profiler (`ProfileSession(nested=False)`) stays installed across returns to the main loop, and `done()` reports back. `runner.run_checks_async` runs the normal checks, then each async one in turn with a timeout. Only the report window's Deep scan (and `whyslow.report(deep=True)` in the GUI) runs them; `runner.run_checks` skips them.
 
 **Deep scan:** checks with `deep = True` only run from the Deep scan button (or `whyslow.report(deep=True)`). Quick scans list them as skipped, "deep scan only".
 
@@ -66,16 +69,18 @@ The probes found so far are synchronous: emitting a signal runs its receivers di
 - `tests/test_whyslow.py`, headless: `/opt/Nuke15.2v9/Nuke15.2 -ti tests/test_whyslow.py` (add `-v` to print the reports). Synthetic scripts plus real Stamps nodes from `tests/fixtures/`. It writes `showcase_report.json` to `$WHYSLOW_TEST_OUT` (default `/tmp/whyslow_test`). It passed in 15.2v9 and 17.1v1 on 2026-11-17. Vanilla Stamps' unguarded knob scripts print `NameError: stamps` while pasting headless; that's noise, not a failure.
 - `tests/make_stamps_fixtures.py` regenerates `stamps_vanilla.nk` and `stamps_custom.nk` with each real Stamps build, one Nuke process per build.
 - `tests/gui_preview.py` renders the report and details dialogs offscreen from the showcase JSON (run the tests first). See the docstring for the command.
-- `tests/test_gui_probes.py`, **inside GUI Nuke** (`exec(open(...).read())`, e.g. through nuke-mcp). It plants one hook of each kind from a fake `fake_tool` module and reproduces KnobScripter with filler output, checks each card, then cleans up. KnobScripter's hook can't be removed, so restart Nuke afterwards. All passed in 15.2v9 on 2026-11-17.
+- `tests/test_gui_async.py`, **inside GUI Nuke**. It runs real async deep scans (clean, planted, then clean again) and stores results in `builtins._whyslow_gui_async`; read them once it's done (a few seconds). All passed in 15.2v9 on 2026-11-17.
+- `tests/test_gui_probes.py`, **inside GUI Nuke** (`exec(open(...).read())`, e.g. through nuke-mcp). It plants one hook of each kind from a fake `fake_tool` module and reproduces KnobScripter with filler output, checks each card, then cleans up. KnobScripter's hook can't be removed, so restart Nuke afterwards. Its KnobScripter severity tests need a fresh Nuke (no hooks, small output) and are skipped otherwise. All passed in 15.2v9 on 2026-11-17.
 - GUI: Harry's checklist. The first pass (7 checks) passed on 2026-11-17.
 
 ## Roadmap
 
-1. More triggers, to *measure* what the global knobChanged and autolabel callbacks cost: change a knob on a temporary node, force a Node Graph redraw (QTimer-driven).
-2. Scanning a script on disk (headless Nuke subprocess, then the report as JSON).
-3. Reading another user's preferences file.
-4. Maybe fix buttons on cards (a `Finding` could carry actions), e.g. "clear the Script Editor output".
-5. Put the Juicy Stamps name in its version string.
+1. More triggers, to *measure* what the global knobChanged and autolabel callbacks cost: change a knob on a temporary node, force a Node Graph redraw (async, like the frame probe).
+2. A static "Python in knob expressions" check (`[python` in `writeKnobs` output, plus `label`, which `writeKnobs` leaves out), to find per-frame Python even on frames the probe doesn't visit. Especially bad with echo on, which echoes every evaluation to the Script Editor.
+3. Scanning a script on disk (headless Nuke subprocess, then the report as JSON).
+4. Reading another user's preferences file.
+5. Maybe fix buttons on cards (a `Finding` could carry actions), e.g. "clear the Script Editor output".
+6. Put the Juicy Stamps name in its version string.
 
 ## Adding a check
 

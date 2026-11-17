@@ -17,16 +17,38 @@ __version__ = "0.1.0"
 
 
 def run(deep: bool = False):
-    """Run every check against the open script (with a progress bar in the GUI)."""
+    """Run the checks against the open script and return the Report.
+
+    Synchronous, so the probes that need Nuke's main loop (the async deep-scan
+    checks) are skipped; use report(deep=True) or the report window for those.
+    """
     from whyslow.core import runner
     from whyslow.progress import NukeProgress
-    with NukeProgress("Why Slow? deep scan" if deep else "Why Slow? scan") as progress:
+    with NukeProgress("Why Slow? scan") as progress:
         return runner.run_checks(deep=deep, progress=progress)
 
 
-def report(print_report: bool = True, deep: bool = False) -> str:
-    """Run every check and print (and return) a plain-text report."""
-    from whyslow.core import text_report
+def report(print_report: bool = True, deep: bool = False):
+    """Run the checks and print (and return) a plain-text report.
+
+    In the GUI, deep=True runs asynchronously: it returns None straight away
+    and prints the report when the probes finish.
+    """
+    from whyslow.core import runner, text_report
+
+    if deep:
+        import nuke
+        if nuke.GUI:
+            from whyslow.progress import NukeProgress
+            progress = NukeProgress("Why Slow? deep scan")
+
+            def finished(result):
+                progress.close()
+                print(text_report.format_report(result))
+
+            runner.run_checks_async(finished, deep=True, progress=progress)
+            return None
+
     text = text_report.format_report(run(deep=deep))
     if print_report:
         print(text)

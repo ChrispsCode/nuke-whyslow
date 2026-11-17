@@ -49,6 +49,7 @@ class ReportDialog(QtWidgets.QDialog):
         self.report: Report | None = None
         self._details: dict[str, DetailsDialog] = {}
         self._spawned = False
+        self._scanning = False
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -134,17 +135,39 @@ class ReportDialog(QtWidgets.QDialog):
     # # #------------------------------------------------------------------------
 
     def rescan(self, deep: bool = False) -> None:
-        """Run the checks with a Nuke progress bar. The window is disabled meanwhile,
-        since a deep scan lets Nuke's event loop run (no re-entrant scans)."""
+        """Run the checks with a Nuke progress bar.
+
+        A deep scan is asynchronous (its probes need Nuke's main loop running),
+        so the window stays disabled until it reports back: no second scan can
+        start on top of it.
+        """
+        if self._scanning:
+            return
+        self._scanning = True
         self.setEnabled(False)
         QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            with NukeProgress("Why Slow? deep scan" if deep else "Why Slow? scan") as progress:
-                report = runner.run_checks(deep=deep, progress=progress)
-        finally:
+        progress = NukeProgress("Why Slow? deep scan" if deep else "Why Slow? scan")
+
+        def finished(report: Report) -> None:
+            progress.close()
             QtWidgets.QApplication.restoreOverrideCursor()
+            self._scanning = False
+            if not is_valid(self):
+                return
             self.setEnabled(True)
-        self.set_report(report)
+            self.set_report(report)
+
+        try:
+            if deep:
+                runner.run_checks_async(finished, deep=True, progress=progress)
+            else:
+                finished(runner.run_checks(progress=progress))
+        except Exception:
+            progress.close()
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self._scanning = False
+            self.setEnabled(True)
+            raise
 
     def set_report(self, report: Report) -> None:
         self.report = report

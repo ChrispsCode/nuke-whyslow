@@ -65,11 +65,9 @@ class KnobScripterHooks(Check):
         worst_ms = 0.0
         worst_chars = 0
         for index, output in enumerate(probe.script_outputs(), 1):
-            entries, _ = probe.profile_entries(lambda: probe.emit_text_changed(output))
+            entries, _, wall = probe.profile_entries(lambda: probe.emit_text_changed(output))
             ks_entries = [e for e in entries if e.tool == TOOL]
-            total_seconds = sum(e.seconds for e in entries) or 1.0
-            ks_share = sum(e.seconds for e in ks_entries) / total_seconds if ks_entries else 0.0
-            cost_ms = probe.median_ms(lambda: probe.emit_text_changed(output)) * ks_share
+            cost_ms = probe.median_ms(lambda: probe.emit_text_changed(output)) * probe.share(ks_entries, wall)
             count = sum(e.calls for e in ks_entries if e.qualname.endswith("<lambda>")) or len(ks_entries)
             chars = output.document().characterCount()
             listeners += count

@@ -84,3 +84,8 @@ EXPECTED_STREAMS = {
     "stdout": "hiero.FnRedirect.SESysStdOut",
     "stderr": "hiero.FnRedirect.SESysStdErr",
 }
+# # Frame-change probe (deep scan): how many one-frame steps to time, and the
+# # GUI time per frame change above which it's reported even when no tool's
+# # Python is to blame.
+FRAME_PROBE_STEPS = 10
+FRAME_SLOW_MS = 50.0

@@ -18,12 +18,15 @@ from __future__ import annotations
 import inspect
 import sys
 import threading
+import time
+import traceback
 
 from whyslow import config
 from whyslow.checks._helpers import ms, plural, print_hook_severity
 from whyslow.core import probe
-from whyslow.core.check import CATEGORY_SESSION, NEEDS_GUI, NEEDS_SESSION, Check, register
+from whyslow.core.check import CATEGORY_SESSION, NEEDS_GUI, NEEDS_SESSION, AsyncCheck, Check, register
 from whyslow.core.finding import FindingItem, Severity
+from whyslow.qt import QtCore
 
 
 def _entry_item(entry: probe.Entry, detail: str) -> FindingItem:
@@ -74,12 +77,10 @@ class ScriptEditorHooks(Check):
             receivers = probe.text_changed_receivers(output)
             if not receivers:
                 continue
-            entries, _ = probe.profile_entries(lambda: probe.emit_text_changed(output))
+            entries, _, wall = probe.profile_entries(lambda: probe.emit_text_changed(output))
             hooks = probe.others(entries)
             mine = [e for e in hooks if e.tool not in config.DEDICATED_TOOLS]
-            total_seconds = sum(e.seconds for e in entries) or 1.0
-            share = sum(e.seconds for e in mine) / total_seconds if mine else 0.0
-            cost_ms = probe.median_ms(lambda: probe.emit_text_changed(output)) * share
+            cost_ms = probe.median_ms(lambda: probe.emit_text_changed(output)) * probe.share(mine, wall)
             worst_ms = max(worst_ms, cost_ms)
             counted += mine
             # # Connections that ran no Python: C++ plugins, or hooks we can't see.
@@ -144,7 +145,7 @@ class AppEventFilters(Check):
     def run(self, ctx):
         count = config.PROBE_EVENT_COUNT
         send = probe.send_probe_events(count)
-        entries, _ = probe.profile_entries(send)
+        entries, _, _ = probe.profile_entries(send)
         filters = probe.others(entries)
         if not filters:
             return None
@@ -173,7 +174,7 @@ class AppEventFilters(Check):
 # # #----------------------------------------------------------------------------
 
 @register
-class IdlePython(Check):
+class IdlePython(AsyncCheck):
     id = "idle_python"
     title = "Python running while idle"
     category = CATEGORY_SESSION
@@ -185,9 +186,33 @@ class IdlePython(Check):
     # # ms of Python per second of idle -> severity.
     severity_steps = ((0, Severity.LOW), (10, Severity.MEDIUM), (50, Severity.HIGH))
 
-    def run(self, ctx):
+    def start(self, ctx, done, progress):
+        # # Asynchronous, so Nuke's own idle work runs normally while we watch.
         seconds = config.IDLE_PROBE_SECONDS
-        entries, _ = probe.profile_entries(lambda: probe.run_event_loop(seconds))
+        tick_ms = 250
+        ticks = max(1, int(seconds * 1000 / tick_ms))
+        session = probe.ProfileSession(nested=False)
+        state = {"tick": 0, "started": time.perf_counter()}
+
+        def tick():
+            state["tick"] += 1
+            cancelled = progress(state["tick"] / ticks)
+            if state["tick"] < ticks and not cancelled:
+                QtCore.QTimer.singleShot(tick_ms, tick)
+                return
+            entries = session.stop()
+            if cancelled:
+                done(None)
+                return
+            try:
+                done(self._finding(entries, time.perf_counter() - state["started"]))
+            except Exception:
+                done(error=traceback.format_exc())
+
+        session.start()
+        QtCore.QTimer.singleShot(tick_ms, tick)
+
+    def _finding(self, entries, seconds: float):
         busy = probe.others(entries)
         if not busy:
             return None
@@ -197,7 +222,7 @@ class IdlePython(Check):
             metric=f"{ms_per_s:.1f} ms/s",
             summary=(f"While Nuke sat idle, Python from {_tools(busy)} kept running: "
                      f"{ms_per_s:.1f} ms of every second."),
-            whats_happening=(f"Nuke was left idle for {seconds:g} s and every Python function it "
+            whats_happening=(f"Nuke was left idle for {seconds:.1f} s and every Python function it "
                              "called into was recorded. Nuke's own (like the status bar) are left "
                              "out. These are usually QTimers polling for something."),
             why_slow=("Work that runs on a timer competes with everything else on Nuke's main "

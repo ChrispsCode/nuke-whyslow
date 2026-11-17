@@ -65,6 +65,8 @@ class Check:
     deep: bool = False
     # # Shown in the progress bar while this check runs.
     progress_message: str = ""
+    # # True for AsyncCheck subclasses.
+    is_async: bool = False
     # # Lower runs (and lists) first among equal severities.
     order: int = 100
     # # Count-based default severity: the highest step whose threshold the count
@@ -96,6 +98,32 @@ class Check:
         kwargs.setdefault("check_id", self.id)
         kwargs.setdefault("title", self.title)
         return Finding(**kwargs)
+
+
+class AsyncCheck(Check):
+    """A check that needs Nuke's main loop to run while it works.
+
+    Nuke holds back its own UI updates (Node Graph redraws, panel refreshes,
+    frame-change work) until the running Python command returns, so probes of
+    those can't run inside a scan's Python call. Instead start() sets things
+    going (usually with QTimers) and returns, and calls done() later. Only
+    runner.run_checks_async runs these; the synchronous runner skips them.
+    """
+
+    is_async = True
+    # # Seconds before the runner gives up on done() and reports an error.
+    timeout: float = 60.0
+
+    def start(self, ctx: ScanContext, done, progress) -> None:
+        """Begin the probe. Call done(finding_or_None) once, or done(error=traceback_text).
+
+        progress(fraction, message) updates the progress bar for this check
+        (fraction 0-1 within the check) and returns True if the user cancelled.
+        """
+        raise NotImplementedError
+
+    def run(self, ctx):
+        raise RuntimeError(f"{self.id} is asynchronous: use runner.run_checks_async")
 
 
 # # #----------------------------------------------------------------------------
