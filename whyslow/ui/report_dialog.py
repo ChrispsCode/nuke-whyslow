@@ -175,7 +175,7 @@ class ReportDialog(QtWidgets.QDialog):
 
         self.script_label.setText(report.script_name)
         scan = "Deep scan" if report.deep else "Quick scan"
-        self.info_label.setText(f"{report.node_count:,} nodes  ·  Nuke {report.nuke_version}  ·  "
+        self.info_label.setText(f"{report.node_summary}  ·  Nuke {report.nuke_version}  ·  "
                                 f"{scan} in {report.duration:.2f}s"
                                 + ("  ·  CANCELLED" if report.cancelled else ""))
         self.summary_label.setText(self._summary_html(report))

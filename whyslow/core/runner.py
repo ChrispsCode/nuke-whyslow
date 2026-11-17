@@ -48,6 +48,15 @@ class Report:
     results: list[CheckResult] = field(default_factory=list)
     deep: bool = False
     cancelled: bool = False
+    # # Nodes in the main Node Graph; node_count includes those inside groups.
+    top_level_count: int = 0
+
+    @property
+    def node_summary(self) -> str:
+        """"12 top-level nodes (2,814 total)", or "14 nodes" when there are no groups."""
+        if self.top_level_count == self.node_count:
+            return f"{self.node_count:,} node{'s' if self.node_count != 1 else ''}"
+        return f"{self.top_level_count:,} top-level nodes ({self.node_count:,} total)"
 
     @property
     def issues(self) -> list[CheckResult]:
@@ -164,6 +173,7 @@ def _report(ctx, start, results, deep, cancelled) -> Report:
         results=results,
         deep=deep,
         cancelled=cancelled,
+        top_level_count=ctx.top_level_count,
     )
 
 

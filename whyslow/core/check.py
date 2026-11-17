@@ -145,5 +145,10 @@ def register(cls: type[Check]) -> type[Check]:
     return cls
 
 
+def unregister(check_id: str) -> None:
+    """Remove a check (used when regenerating checks built from config)."""
+    _REGISTRY.pop(check_id, None)
+
+
 def registered_checks() -> list[type[Check]]:
     return list(_REGISTRY.values())

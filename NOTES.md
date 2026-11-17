@@ -28,6 +28,7 @@ Started 2026-11-17 after the KnobScripter investigation ([knobscripter_findings.
 |---|---|---|
 | `node_knobchanged` | 1-2 nodes Medium, 3+ High | Top-level nodes only. Stamps excluded. |
 | `node_autolabel` | 1-2 nodes Medium, 3+ High | Top-level nodes only. Stamps excluded. |
+| `node_knobchanged_<tool>` | From the entry's `severity`, or the main card's steps | One generated card per `config.EXTRA_NODE_KNOB_CHANGED` entry (e.g. CompAI). It claims top-level knobChanged nodes by an `id` knob/value, or else by the exact callback string. Claimed nodes leave the main card, so one tool can't flood it. Missing card text falls back to the main card's wording. |
 | `buried_node_callbacks` | Low | knobChanged/autolabel on nodes inside groups and gizmos. Burying is a valid trick, so this is just for information. |
 | `global_knobchanged` / `global_autolabel` / `global_updateui` | `*` High; a class present in the script Medium; absent Low | Stock entries are filtered by source file: anything inside the Nuke install folder, plus `config.IGNORED_CALLBACKS`. |
 | `bbox_warning` | High | `preferences.boundingBoxWarning` (Preferences > Panels > Node Graph). |
@@ -75,7 +76,7 @@ What counts as an entry point: a call from C++, or a third-party function **from
 
 ## Field testing
 
-[docs/HANDOFF_production_test.md](docs/HANDOFF_production_test.md) briefs a claude.ai web chat for testing in production, where Claude Code isn't available. It covers what Why Slow? does and can't see yet, Script Editor snippets for investigating on the spot (also in `docs/snippets/`: the callback inventory, the recorder, thread sampling, Qt objects, and the stall meter; all run in the 15.2 GUI on 2026-11-17), and the report format to bring home.
+`docs/snippets/` holds Script Editor snippets for investigating slowness Why Slow? doesn't catch yet: the callback inventory (every registry), the recorder (what Python runs while you reproduce a slow action), thread sampling, Qt objects and timers, and the stall meter. All ran in the 15.2 GUI on 2026-11-17. The first production test found the proprietary tool's slowdown straight from the global knobChanged card.
 
 ## Roadmap
 

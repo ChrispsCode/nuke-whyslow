@@ -21,14 +21,24 @@ LOG_PREFIX_STYLE = "short"
 # # #----------------------------------------------------------------------------
 
 # # Each check ships its own default severity (its `severity_steps`). Override
-# # any check here by its id, without touching the check itself. Two forms:
+# # any check here by its id (each check's `id`), without touching the check
+# # itself.
 # #
-# #   "bbox_warning": "medium",                          # always this severity
-# #   "node_knobchanged": ((1, "medium"), (3, "high")),  # by count: at least N -> severity
+# # Severity names (any case): "info", "low", "medium", "high", "critical".
 # #
-# # Severity names: info, low, medium, high, critical. The fixed form works for
-# # every check; the count form only for checks that grade by a count (the
-# # global callback checks grade by reach instead).
+# # A value is one of:
+# #   - A name: that severity whatever the count.
+# #       "bbox_warning": "medium",
+# #   - Count steps: a tuple (or list) of (at least N, name) pairs. The highest
+# #     step the count reaches wins; a count below the first step is "info".
+# #       "node_knobchanged": ((1, "medium"), (3, "high")),
+# #     gives 1-2 nodes Medium, and 3 or more (e.g. 5) High.
+# #       ((1, "low"), (10, "medium"), (30, "high"))
+# #     gives 1-9 Low, 10-29 Medium, 30+ High.
+# #
+# # A name works for every check. Count steps only apply to checks that grade
+# # by a count (the global callback checks grade by reach, and the probes by
+# # measured time, which their steps are in instead: see each check).
 SEVERITY_OVERRIDES: dict = {
 }
 
@@ -89,3 +99,51 @@ EXPECTED_STREAMS = {
 # # Python is to blame.
 FRAME_PROBE_STEPS = 10
 FRAME_SLOW_MS = 50.0
+
+# # #----------------------------------------------------------------------------
+# # Tools whose nodes get their own knobChanged card
+# # #----------------------------------------------------------------------------
+
+# # Nodes in the main Node Graph whose knobChanged belongs to one of these tools
+# # go on that tool's own card instead of "Nodes with knobChanged callbacks",
+# # so one tool's nodes can't flood the main card. Each entry:
+# #
+# #   "name"      Tool name, used for the card title ("<name> nodes with
+# #               knobChanged callbacks") and its check id: "node_knobchanged_"
+# #               plus the name in lower case, with anything other than letters
+# #               and digits turned into "_" ("Fake Tool" -> node_knobchanged_fake_tool).
+# #   "id"        {"id_knob": knob name, "id_value": value}: matches nodes that
+# #               have that knob with that value. With no "id_value" (or None),
+# #               having the knob is enough. When "id" is a dict it's used and
+# #               "callback" is ignored.
+# #   "callback"  Otherwise: the node's knobChanged code. Either one string, or
+# #               a list of strings (a node matching any of them counts). Matched
+# #               exactly, except that spaces, tabs and newlines at the start and
+# #               end are ignored on both sides.
+# #   "severity"  Severity of the tool's card, by how many of its nodes there are:
+# #                 - a name ("info", "low", "medium", "high", "critical", any
+# #                   case): that severity for any number of nodes;
+# #                 - count steps, a tuple (or list) of (at least N, name) pairs:
+# #                   ((1, "low"), (10, "medium")) gives 1-9 nodes Low and 10 or
+# #                   more (e.g. 25) Medium; below the first step is "info";
+# #                 - missing or None: the main card's steps, ((1, "medium"),
+# #                   (3, "high")), so 1-2 nodes Medium and 3 or more (e.g. 5) High.
+# #               SEVERITY_OVERRIDES["node_knobchanged_<name>"] still wins over this.
+# #   "summary", "what", "why", "how"
+# #               Card text: the summary on the card, and the details' "What's
+# #               happening", "Why it's slow" and "How to fix". Missing, None or
+# #               "": the main card's wording.
+# #
+# # Only nodes with knobChanged code are considered; Stamps never are.
+EXTRA_NODE_KNOB_CHANGED = [
+    {
+        "name": "CompAI",
+        "callback": "import compai; compai.on_knob_changed()",
+        "severity": ((5, "low"), (15, "medium")),
+        "why": ("CompAI's knobChanged runs on every knob change on its nodes, but it only "
+                "does real work for a few of its own knobs and for input changes; for "
+                "anything else it's mostly quick name checks."),
+        "how": ("Nothing to fix: it can't be disarmed while the panel is closed, "
+                "because it has to keep working then."),
+    },
+]

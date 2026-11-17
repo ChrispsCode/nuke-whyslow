@@ -93,6 +93,11 @@ class ScanContext:
         return nuke.allNodes(group=nuke.root(), recurseGroups=True)
 
     @cached_property
+    def top_level_count(self) -> int:
+        """Nodes in the main Node Graph (not inside groups or gizmos)."""
+        return sum(1 for node in self.all_nodes if self.is_top_level(node))
+
+    @cached_property
     def class_counts(self) -> collections.Counter:
         return collections.Counter(node.Class() for node in self.all_nodes)
 

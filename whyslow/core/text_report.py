@@ -45,7 +45,7 @@ def format_report(report: Report) -> str:
     lines = [
         RULE,
         f"Why Slow? report: {report.script_name}",
-        f"Nuke {report.nuke_version} | {report.node_count} nodes | "
+        f"Nuke {report.nuke_version} | {report.node_summary} | "
         f"{'deep' if report.deep else 'quick'} scan in {report.duration:.2f}s"
         + (" | CANCELLED" if report.cancelled else ""),
         f"{len(issues)} issue(s) found",
