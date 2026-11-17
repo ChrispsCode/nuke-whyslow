@@ -7,6 +7,18 @@ from __future__ import annotations
 
 import logging
 
+# # For testing the settings, run this after changes and relaunch the window:
+# # import whyslow; whyslow.reload_package()
+
+# # To test the network timer:
+# SEVERITY_OVERRIDES: dict = {
+#     "storage": ((0, "low"),),
+# }
+
+# # Find baseline values for each level:
+# "storage": ((15, "low"), (50, "medium"), (200, "high"), (1000, "critical")),
+
+
 # # #----------------------------------------------------------------------------
 # # Logging (see logger.py)
 # # #----------------------------------------------------------------------------
