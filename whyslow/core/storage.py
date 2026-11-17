@@ -119,17 +119,17 @@ def mount_for(path: str, mounts: list[Mount]) -> Mount:
 # # The probe
 # # #----------------------------------------------------------------------------
 
-class _Watched:
+class Watched:
     """Runs fn in a daemon thread and records when its current step started,
     so the poller can tell a slow filer from a hung one."""
 
-    def __init__(self, fn):
+    def __init__(self, fn, name: str = "whyslow-storage"):
         self.fn = fn
         self.step = ""
         self.step_started: float | None = None
         self.done = False
         self.error: BaseException | None = None
-        self.thread = threading.Thread(target=self._run, daemon=True, name="whyslow-storage")
+        self.thread = threading.Thread(target=self._run, daemon=True, name=name)
 
     def begin(self, step: str) -> None:
         self.step, self.step_started = step, time.perf_counter()
@@ -166,9 +166,9 @@ class StorageProbe:
         self.repeats = repeats
         self.mounts = mounts if mounts is not None else read_mounts()
         self._slots = threading.Semaphore(max_threads)
-        self._resolvers: dict[str, _Watched] = {}
+        self._resolvers: dict[str, Watched] = {}
         self._real: dict[str, str] = {}
-        self._timers: dict[str, tuple[_Watched, FilerResult]] = {}
+        self._timers: dict[str, tuple[Watched, FilerResult]] = {}
         self._phase = "new"
         self._phase_started = 0.0
         self._filers: dict[str, FilerResult] = {}
@@ -177,7 +177,7 @@ class StorageProbe:
 
     def start(self) -> None:
         for directory in sorted({use.directory for use in self.uses}):
-            watched = _Watched(lambda w, d=directory: self._resolve(w, d))
+            watched = Watched(lambda w, d=directory: self._resolve(w, d))
             self._resolvers[directory] = watched
             watched.thread.start()
         self._phase = "resolving"
@@ -188,13 +188,13 @@ class StorageProbe:
         behind ones stuck on a dead filer."""
         return time.perf_counter() - self._phase_started > self.op_timeout * steps
 
-    def _resolve(self, watched: _Watched, directory: str) -> None:
+    def _resolve(self, watched: Watched, directory: str) -> None:
         with self._slots:
             watched.begin("resolving")
             self._real[directory] = os.path.realpath(directory)
             watched.end()
 
-    def _measure(self, watched: _Watched, result: FilerResult) -> None:
+    def _measure(self, watched: Watched, result: FilerResult) -> None:
         samples = [s for use in result.uses for s in use.samples]
         directories = [use.directory for use in result.uses]
         with self._slots:
@@ -284,7 +284,7 @@ class StorageProbe:
         for key, result in filers.items():
             if result.hung:
                 continue
-            watched = _Watched(lambda w, r=result: self._measure(w, r))
+            watched = Watched(lambda w, r=result: self._measure(w, r))
             self._timers[key] = (watched, result)
             watched.thread.start()
         self._filers = filers

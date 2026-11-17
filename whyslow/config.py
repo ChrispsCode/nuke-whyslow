@@ -173,3 +173,78 @@ EXTRA_NODE_KNOB_CHANGED = [
                 "because it has to keep working then."),
     },
 ]
+
+
+# # #----------------------------------------------------------------------------
+# # Timed functions
+# # #----------------------------------------------------------------------------
+
+# # Functions run and timed on a deep scan, one card each ("Timed: <name>"),
+# # to check things only the studio knows about: a query to each database, a
+# # call to a file service, a licence check. Write them below (or import them
+# # inside the function, so loading this config never imports a database
+# # client) and list them here. Each entry is a dict:
+# #
+# #   "function"  The function itself, or a string of Python code run with this
+# #               file's names available ("ping('shots_db')"). Required.
+# #   "name"      Card title ("Timed: <name>") and check id: "timed_" plus the
+# #               name in lower case, with anything other than letters and
+# #               digits turned into "_". Default: the function's name.
+# #   "severity"  By the median time per call, in ms:
+# #                 - steps, a tuple (or list) of (at least N ms, name) pairs:
+# #                   ((100, "low"), (500, "medium")) gives 100-499 ms Low and
+# #                   500 ms or more (e.g. 2 s) Medium; faster than the first
+# #                   step is an "info" card, showing the time;
+# #                 - a name: that severity whatever the time;
+# #                 - missing or None: ((100, "low"), (500, "medium"),
+# #                   (2000, "high"), (10000, "critical")).
+# #               SEVERITY_OVERRIDES["timed_<name>"] still wins over this.
+# #   "error_severity"
+# #               When the function raises (e.g. connection refused). Default
+# #               "high". A call that doesn't answer within "timeout" is
+# #               always "critical".
+# #   "repeats"   Calls to time; the card shows the median (the first call often
+# #               includes connecting or importing). Default 3. Stops at the
+# #               first error.
+# #   "timeout"   Seconds a call may take before it counts as no answer.
+# #               Default 10.
+# #   "deep_scan_only"
+# #               True (default): only a Deep scan runs it, and a fast result
+# #               still gets an "info" card showing its time.
+# #               False: the main scan runs it too, and there a fast result gets
+# #               no card, so a healthy session can still show "no issues found".
+# #               A Deep scan still shows its "info" card, to rule it out.
+# #               NOTE: the main scan then waits for its calls (up to "timeout"
+# #               per call when the service doesn't answer).
+# #   "main_thread"
+# #               False (default): run in a background thread, so a service that
+# #               never answers can't freeze Nuke; the hung call is abandoned.
+# #               True: run on Nuke's main thread, for functions that use the
+# #               nuke module (NOTE: which isn't safe from other threads). 
+# #               NOTE: A hung call on the main thread will freeze Nuke until 
+# #               it returns.
+# #   "summary", "what", "why", "how"
+# #               Card text. "summary" is added after the measured time on the
+# #               card, and "what" before how it was run in "What's happening".
+# #               "why" and "how" replace the default "Why it's slow" and "How to
+# #               fix". All optional.
+# #
+# # A function (or code string) on its own also works, with every default.
+# # Whatever it returns is shown in Details, so a query can return its answer.
+EXTRA_TIMED_FUNCTIONS = [
+    # {
+    #     "name": "Example (sleep)",
+    #     "function": "example_function()",
+    #     "severity": ((50, "low"), (150, "medium"), (300, "high"), (1000, "critical")),
+    #     "summary": "An example function, just a test for now.",
+    #     "why": "This is an example function that simulates some work being done.",
+    #     "how": "Nothing to fix: it's just an example.",
+    #     "deep_scan_only": False,
+    # },
+]
+
+
+def example_function() -> str:
+    from time import sleep
+    sleep(0.01)  # # simulates some work being done
+    return "done"

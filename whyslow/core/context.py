@@ -51,6 +51,10 @@ class CallbackEntry:
 class ScanContext:
     """The live Nuke session: the open script, its preferences and callbacks."""
 
+    # # Set by the runner: True during a deep scan, so a check that runs in both
+    # # scans can report differently (timed functions show their Info card).
+    deep: bool = False
+
     @property
     def provides(self) -> frozenset[str]:
         base = {NEEDS_SCRIPT, NEEDS_PREFS, NEEDS_SESSION}

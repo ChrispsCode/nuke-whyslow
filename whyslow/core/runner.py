@@ -128,7 +128,7 @@ def run_check(check: Check, ctx, deep: bool = False) -> CheckResult:
     """Run one synchronous check. Async checks are skipped here."""
     reason = _skip_reason(check, ctx, deep)
     if not reason and check.is_async:
-        reason = "runs from the report window's deep scan"
+        reason = "runs from the report window (asynchronous)"
     if reason:
         return _new_result(check, STATUS_SKIPPED, reason)
 
@@ -188,6 +188,7 @@ def run_checks(ctx=None, deep: bool = False, progress=None) -> Report:
     if ctx is None:
         from whyslow.core.context import ScanContext
         ctx = ScanContext()
+    ctx.deep = deep
     start = time.perf_counter()
     results = discover_checks()
     checks = _sorted_checks()
@@ -209,6 +210,7 @@ def run_checks_async(on_finished, ctx=None, deep: bool = False, progress=None) -
     if ctx is None:
         from whyslow.core.context import ScanContext
         ctx = ScanContext()
+    ctx.deep = deep
     start = time.perf_counter()
     results = discover_checks()
     checks = _sorted_checks()

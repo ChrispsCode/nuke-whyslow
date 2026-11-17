@@ -137,8 +137,8 @@ class ReportDialog(QtWidgets.QDialog):
     def rescan(self, deep: bool = False) -> None:
         """Run the checks with a Nuke progress bar.
 
-        A deep scan is asynchronous (its probes need Nuke's main loop running),
-        so the window stays disabled until it reports back: no second scan can
+        Scans are asynchronous (probes need Nuke's main loop running), so the
+        window stays disabled until the scan reports back: no second scan can
         start on top of it.
         """
         if self._scanning:
@@ -158,10 +158,9 @@ class ReportDialog(QtWidgets.QDialog):
             self.set_report(report)
 
         try:
-            if deep:
-                runner.run_checks_async(finished, deep=True, progress=progress)
-            else:
-                finished(runner.run_checks(progress=progress))
+            # # Asynchronous either way: the main scan can hold async checks too
+            # # (timed functions with deep_scan_only False).
+            runner.run_checks_async(finished, deep=deep, progress=progress)
         except Exception:
             progress.close()
             QtWidgets.QApplication.restoreOverrideCursor()
