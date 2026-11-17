@@ -100,6 +100,13 @@ EXPECTED_STREAMS = {
 FRAME_PROBE_STEPS = 10
 FRAME_SLOW_MS = 50.0
 
+# # Node-creation probe (deep scan): these classes are created (with
+# # nuke.createNode, like a user would) and deleted again, with undo off, and
+# # any tool Python that runs is recorded. Reported even without tool Python
+# # when creating one takes longer than NODE_CREATE_SLOW_MS of GUI time.
+NODE_CREATE_PROBE_CLASSES = ["Blur"]
+NODE_CREATE_SLOW_MS = 100.0
+
 # # Storage probe (deep scan): every file the script reads and the session
 # # depends on is traced to its real filer, and each filer is timed in the
 # # background (a stat, then an open + 64 KB read of a file the script uses).

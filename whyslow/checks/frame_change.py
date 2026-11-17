@@ -18,7 +18,7 @@ import traceback
 import nuke
 
 from whyslow import config
-from whyslow.checks._helpers import ms, plural
+from whyslow.checks._helpers import entry_item, ms, plural, wait_lines, wait_text, waits_note
 from whyslow.core import probe
 from whyslow.core.check import CATEGORY_SESSION, NEEDS_GUI, NEEDS_SESSION, AsyncCheck, register
 from whyslow.core.finding import FindingItem, Severity
@@ -77,11 +77,12 @@ def _items(entries: list[probe.Entry], frames: int) -> list[FindingItem]:
                     kind="Python in a knob", detail=f"{calls / frames:.1f} calls/frame, "
                                                     f"{ms(seconds * 1000 / frames)}/frame (profiled)",
                     code=f"# {label}\n{code}"))
+            if entry.waits:  # # waits aren't split per node; show them once, on their own row
+                items.append(FindingItem(label="Knob Python (all nodes)", kind="Waited on I/O",
+                                         detail=wait_text(entry).lstrip("; "), code=wait_lines(entry)))
         else:
-            items.append(FindingItem(
-                label=entry.label, kind=entry.tool,
-                detail=f"{entry.calls / frames:.1f} calls/frame, {ms(entry.seconds * 1000 / frames)}/frame (profiled)",
-                code=f"# {entry.location}"))
+            items.append(entry_item(entry, f"{entry.calls / frames:.1f} calls/frame, "
+                                           f"{ms(entry.seconds * 1000 / frames)}/frame (profiled)"))
     return items
 
 
@@ -221,7 +222,7 @@ class FrameChange(AsyncCheck):
             severity=self.severity_for(int(python_ms)),
             metric=f"{ms(python_ms)}/frame",
             summary=(f"Every frame change runs {ms(python_ms)} of Python from {', '.join(tools)}. "
-                     f"Each frame change took {ms(per_frame)} of GUI time in total."),
+                     f"Each frame change took {ms(per_frame)} of GUI time in total." + waits_note(python)),
             whats_happening=(
                 f"Stepped through {where}, one frame at a time, without letting the Viewer render, "
                 f"and recorded what ran. {plural(len(python), 'Python entry point')} ran on frame "

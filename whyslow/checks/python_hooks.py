@@ -22,32 +22,14 @@ import time
 import traceback
 
 from whyslow import config
-from whyslow.checks._helpers import ms, plural, print_hook_severity
+from whyslow.checks._helpers import entry_item, ms, plural, print_hook_severity, waits_note
 from whyslow.core import probe
 from whyslow.core.check import CATEGORY_SESSION, NEEDS_GUI, NEEDS_SESSION, AsyncCheck, Check, register
 from whyslow.core.finding import FindingItem, Severity
 from whyslow.qt import QtCore
 
 
-def _entry_item(entry: probe.Entry, detail: str) -> FindingItem:
-    dedicated = entry.tool in config.DEDICATED_TOOLS
-    return FindingItem(
-        label=entry.label, kind=entry.tool + (" (has its own card)" if dedicated else ""),
-        detail=detail,
-        code=f"# {entry.location}\n# tool: {entry.tool}\n\n{_source(entry)}",
-    )
-
-
-def _source(entry: probe.Entry) -> str:
-    """The entry function's source, read from its file (best effort)."""
-    try:
-        with open(entry.filename) as handle:
-            lines = handle.readlines()
-        block = inspect.getblock(lines[entry.line - 1:])
-        text = "".join(block)
-        return text[: config.MAX_CODE_CHARS]
-    except Exception:
-        return "# Source not available."
+_entry_item = entry_item
 
 
 def _tools(entries) -> str:
@@ -221,7 +203,7 @@ class IdlePython(AsyncCheck):
             severity=self.severity_for(int(ms_per_s)),
             metric=f"{ms_per_s:.1f} ms/s",
             summary=(f"While Nuke sat idle, Python from {_tools(busy)} kept running: "
-                     f"{ms_per_s:.1f} ms of every second."),
+                     f"{ms_per_s:.1f} ms of every second." + waits_note(busy)),
             whats_happening=(f"Nuke was left idle for {seconds:.1f} s and every Python function it "
                              "called into was recorded. Nuke's own (like the status bar) are left "
                              "out. These are usually QTimers polling for something."),

@@ -19,6 +19,7 @@ import collections
 import os
 import sys
 import time
+import types
 from dataclasses import dataclass, field
 
 import nuke
@@ -30,6 +31,43 @@ SCRIPT_OUTPUT_CLASS = "Foundry::PythonUI::ScriptOutputWidget"
 KIND_STOCK = "stock"      # # Nuke's own code (inside the install folder) or Python's
 KIND_SELF = "whyslow"     # # this tool
 KIND_OTHER = "other"      # # anything else: a third-party tool
+
+# # #----------------------------------------------------------------------------
+# # Blocking calls: C functions where Python waits on the disk, the network or
+# # another process. Recognised by name first (cheap, runs on every C call),
+# # then by the module that owns them.
+# # #----------------------------------------------------------------------------
+
+_BLOCKING_NAMES = frozenset({
+    # # disk
+    "stat", "lstat", "fstat", "statvfs", "open", "listdir", "scandir", "access", "readlink",
+    "read", "readinto", "readline", "readlines", "write", "flush",
+    # # network
+    "connect", "connect_ex", "accept", "recv", "recv_into", "recvfrom", "recvfrom_into",
+    "send", "sendall", "sendto", "getaddrinfo", "gethostbyname", "gethostbyname_ex",
+    "gethostbyaddr", "getnameinfo", "do_handshake",
+    # # waiting
+    "select", "poll", "sleep", "waitpid", "wait", "fork_exec", "system",
+})
+_BLOCKING_MODULES = {
+    "posix": "os", "nt": "os", "_io": "io", "io": "io", "_socket": "socket", "socket": "socket",
+    "select": "select", "time": "time", "_posixsubprocess": "subprocess", "_ssl": "ssl", "ssl": "ssl",
+}
+
+
+def blocking_label(func) -> str | None:
+    """"socket.socket.recv", "os.stat"... if `func` is a call that can block, else None."""
+    name = getattr(func, "__name__", None)
+    if name not in _BLOCKING_NAMES:
+        return None
+    owner = getattr(func, "__self__", None)
+    if owner is None or isinstance(owner, types.ModuleType):
+        module = owner.__name__ if owner is not None else getattr(func, "__module__", None)
+        pretty = _BLOCKING_MODULES.get(module or "")
+        return f"{pretty}.{name}" if pretty else None
+    cls = type(owner)
+    pretty = _BLOCKING_MODULES.get(cls.__module__)
+    return f"{pretty}.{cls.__name__}.{name}" if pretty else None
 
 
 @dataclass
@@ -46,6 +84,26 @@ class Entry:
     # # For code run from knob strings ("<string>": expressions, knobChanged,
     # # autolabel...): (node full name, knob name) -> [calls, seconds].
     contexts: dict = field(default_factory=dict)
+    # # Time spent blocked in disk / network / process calls, within this
+    # # entry's time: label ("socket.socket.recv") -> [calls, seconds].
+    waits: dict = field(default_factory=dict)
+
+    @property
+    def wait_seconds(self) -> float:
+        return sum(seconds for _, seconds in self.waits.values())
+
+    def wait_summary(self, top: int = 3) -> str:
+        """"socket.socket.recv x3 (2.3 s), os.stat x1 (12 ms)", longest first."""
+        ordered = sorted(self.waits.items(), key=lambda item: -item[1][1])
+        parts = []
+        for label, (calls, seconds) in ordered[:top]:
+            value = seconds * 1000
+            shown = (f"{value / 1000:.1f} s" if value >= 1000 else
+                     f"{value:.1f} ms" if value >= 1 else f"{value:.2f} ms")
+            parts.append(f"{label} x{calls} ({shown})")
+        if len(ordered) > top:
+            parts.append(f"and {len(ordered) - top} more")
+        return ", ".join(parts)
 
     @property
     def tool(self) -> str:
@@ -106,10 +164,11 @@ class ProfileSession:
         self.nuke_dir = os.path.realpath(os.path.dirname(nuke.EXE_PATH))
         self.entries: dict[tuple, Entry] = {}
         self._kinds: dict[tuple, str] = {}
-        # # Items: "c" while a C function runs, else (entry key or None, start,
-        # # knob context, inside third-party code). Nested mode starts with a
-        # # frame for our own call, so it isn't an entry.
-        self.stack: list = [(None, 0.0, None, False)] if nested else []
+        # # Items, the last field always the key of the entry they belong to:
+        # #   ("c", start, blocking label or None, owner)  while a C function runs
+        # #   ("py", entry key or None, start, knob context, inside third-party code, owner)
+        # # Nested mode starts with a frame for our own call, so it isn't an entry.
+        self.stack: list = [("py", None, 0.0, None, False, None)] if nested else []
         self._previous = None
         self._running = False
         self._started = 0.0
@@ -125,21 +184,24 @@ class ProfileSession:
     def _profiler(self, frame, event, arg):
         stack = self.stack
         if event == "call":
-            parent = stack[-1] if stack else "c"
+            parent = stack[-1] if stack else None
             code = frame.f_code
             module = frame.f_globals.get("__name__") or ""
             kind = self._kind_of(code.co_filename, module)
-            if parent == "c":
+            if parent is None or parent[0] == "c":
                 is_entry, inside_other = True, kind == KIND_OTHER
-            elif parent[3]:
+            elif parent[4]:
                 is_entry, inside_other = False, True
             else:
-                # # Called from Nuke's own Python: only a function from a real file
-                # # starts a tool's entry. Code generated by libraries (namedtuple,
-                # # dataclasses: "<string>") belongs to whoever called it.
-                is_entry = inside_other = kind == KIND_OTHER and not code.co_filename.startswith("<")
+                # # Called from Nuke's own Python: a function from a real file, or
+                # # one typed in the Script Editor ("<string>" in __main__, e.g. a
+                # # lambda passed to nuke.addOnCreate), starts a tool's entry. Code
+                # # generated by libraries (namedtuple, dataclasses: "<string>" in
+                # # their own module) belongs to whoever called it.
+                is_entry = inside_other = kind == KIND_OTHER and (
+                    not code.co_filename.startswith("<") or module == "__main__")
             if not is_entry:
-                stack.append((None, 0.0, None, inside_other))
+                stack.append(("py", None, 0.0, None, inside_other, parent[-1] if parent else None))
                 return
             key = (code.co_filename, module, getattr(code, "co_qualname", code.co_name), code.co_firstlineno)
             entry = self.entries.get(key)
@@ -149,20 +211,26 @@ class ProfileSession:
             context = _knob_context() if key[0].startswith("<") else None
             if context is not None:
                 entry.contexts.setdefault(context, [0, 0.0])[0] += 1
-            stack.append((key, time.perf_counter(), context, inside_other))
+            stack.append(("py", key, time.perf_counter(), context, inside_other, key))
         elif event == "return":
-            if stack and stack[-1] != "c":
-                key, started, context, _ = stack.pop()
+            if stack and stack[-1][0] == "py":
+                _, key, started, context, _, _ = stack.pop()
                 if key is not None:
                     elapsed = time.perf_counter() - started
                     self.entries[key].seconds += elapsed
                     if context is not None:
                         self.entries[key].contexts[context][1] += elapsed
         elif event == "c_call":
-            stack.append("c")
+            owner = stack[-1][-1] if stack else None
+            label = blocking_label(arg) if owner is not None else None
+            stack.append(("c", time.perf_counter() if label else 0.0, label, owner))
         elif event in ("c_return", "c_exception"):
-            if stack and stack[-1] == "c":
-                stack.pop()
+            if stack and stack[-1][0] == "c":
+                _, started, label, owner = stack.pop()
+                if label is not None:
+                    wait = self.entries[owner].waits.setdefault(label, [0, 0.0])
+                    wait[0] += 1
+                    wait[1] += time.perf_counter() - started
 
     def start(self) -> None:
         self._previous = sys.getprofile()
