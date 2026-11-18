@@ -59,7 +59,7 @@ class ScriptEditorHooks(Check):
             receivers = probe.text_changed_receivers(output)
             if not receivers:
                 continue
-            entries, _, wall = probe.profile_entries(lambda: probe.emit_text_changed(output))
+            entries, _, wall = probe.profile_entries(lambda: probe.emit_text_changed(output), direct_only=True)
             hooks = probe.others(entries)
             mine = [e for e in hooks if e.tool not in config.DEDICATED_TOOLS]
             cost_ms = probe.median_ms(lambda: probe.emit_text_changed(output)) * probe.share(mine, wall)
@@ -127,7 +127,7 @@ class AppEventFilters(Check):
     def run(self, ctx):
         count = config.PROBE_EVENT_COUNT
         send = probe.send_probe_events(count)
-        entries, _, _ = probe.profile_entries(send)
+        entries, _, _ = probe.profile_entries(send, direct_only=True)
         filters = probe.others(entries)
         if not filters:
             return None

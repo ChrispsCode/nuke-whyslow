@@ -158,9 +158,16 @@ class ProfileSession:
     nested=False: for asynchronous probes, where the profiler stays installed
     while control goes back to Nuke's main loop; then a Python call with
     nothing above it on the stack also counts as called from C++.
+
+    direct_only=True: for probes that trigger one thing and ask who answered
+    it. Python reached through Qt from inside an entry isn't that entry's peer
+    (a listener updating a widget runs every event filter; an event filter
+    printing runs every Script Editor listener), so it counts towards the
+    entry that caused it instead of being reported as an entry of its own.
     """
 
-    def __init__(self, nested: bool = True):
+    def __init__(self, nested: bool = True, direct_only: bool = False):
+        self.direct_only = direct_only
         self.nuke_dir = os.path.realpath(os.path.dirname(nuke.EXE_PATH))
         self.entries: dict[tuple, Entry] = {}
         self._kinds: dict[tuple, str] = {}
@@ -189,7 +196,11 @@ class ProfileSession:
             module = frame.f_globals.get("__name__") or ""
             kind = self._kind_of(code.co_filename, module)
             if parent is None or parent[0] == "c":
-                is_entry, inside_other = True, kind == KIND_OTHER
+                owner = parent[-1] if parent is not None else None
+                if self.direct_only and owner is not None and self.entries[owner].kind != KIND_SELF:
+                    is_entry, inside_other = False, True  # # caused by the entry we're inside
+                else:
+                    is_entry, inside_other = True, kind == KIND_OTHER
             elif parent[4]:
                 is_entry, inside_other = False, True
             else:
@@ -247,15 +258,15 @@ class ProfileSession:
         return sorted(self.entries.values(), key=lambda e: -e.seconds)
 
 
-def profile_entries(fn) -> tuple[list[Entry], object, float]:
+def profile_entries(fn, direct_only: bool = False) -> tuple[list[Entry], object, float]:
     """Call `fn()` and return (entry points that ran, fn's return value, wall seconds).
 
     Code with no file ("<string>": knob scripts and [python] expressions) is
     split by the node and knob it ran for (Entry.contexts). Any profile
     function already installed (a profiler someone left on) is put back
-    afterwards.
+    afterwards. `direct_only`: see ProfileSession.
     """
-    session = ProfileSession(nested=True)
+    session = ProfileSession(nested=True, direct_only=direct_only)
     session.start()
     try:
         value = fn()
